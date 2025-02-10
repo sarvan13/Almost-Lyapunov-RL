@@ -17,6 +17,7 @@ class PPOAgent():
         self.max_steps = max_steps
         self.gamma = gamma
         self.epsilon = epsilon
+        self.entropy_beta = 0.01
         self.memory = Memory(memory_size, gamma)
         self.num_grad_updates = num_grad_updates
 
@@ -91,11 +92,15 @@ class PPOAgent():
         returns = advantages + values
 
         # Calculate Policy Loss
+        mean, std = self.policy.forward(states)
+        dist = torch.distributions.Normal(mean, std)
+        entropy = dist.entropy().sum(dim=1, keepdim=True)
+        
         new_log_probs = self.policy.get_log_prob(states, actions)
         ratio = (new_log_probs - old_log_probs).exp()
         policy_loss1 = ratio * advantages
-        policy_loss2 = torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon) * advantages
-        policy_loss = -torch.min(policy_loss1, policy_loss2).mean()
+        policy_loss2 = torch.clamp(ratio, 1-self.epsilon, 1+self.epsilon) * advantages
+        policy_loss = -torch.min(policy_loss1, policy_loss2).mean() - self.entropy_beta*entropy.mean()
 
         # Calculate Value Loss
         value_loss = (0.5*(self.critic(states) - returns) ** 2).mean()
