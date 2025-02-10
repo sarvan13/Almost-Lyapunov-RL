@@ -35,10 +35,10 @@ class Memory():
             #         curr_return = rewards[-i] + self.gamma*curr_return
                     
             #     mc_returns[-i] = curr_return
-            for i in range(len(rewards) - 1):
+            for i in range(len(rewards)):
                 a_t = 0
                 discount = 1
-                for j in range(i, len(rewards) - 1):
+                for j in range(i, len(rewards)):
                     a_t += discount * (rewards[j] + self.gamma*self.current_path[j+1][6] * (1 - self.current_path[j][4]) \
                         - self.current_path[j][6])
                     discount *= self.gamma
@@ -46,7 +46,10 @@ class Memory():
                 advantages[i] = a_t
 
             for tup, value in zip(self.current_path, advantages):
-                self.memory.append((*tup, value))
+                advantages = (advantages - advantages.mean() / 
+                              (advantages.std() + 1e-8))
+                for tup, adv in zip(self.current_path, advantages):
+                    self.memory.append((*tup, adv))
             
             self.current_path.clear()
 
