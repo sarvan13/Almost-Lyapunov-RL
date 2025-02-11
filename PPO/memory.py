@@ -25,6 +25,8 @@ class Memory():
             #mc_returns = np.zeros(len(self.current_path))
             advantages = np.zeros(len(self.current_path))
             rewards = [data[2] for data in self.current_path]
+            values = [data[6] for data in self.current_path]
+            values.append(critic(next_state).detach())
             rewards = np.array(rewards)
             
             # curr_return = 0
@@ -39,8 +41,8 @@ class Memory():
                 a_t = 0
                 discount = 1
                 for j in range(i, len(rewards)):
-                    a_t += discount * (rewards[j] + self.gamma*self.current_path[j+1][6] * (1 - self.current_path[j][4]) \
-                        - self.current_path[j][6])
+                    a_t += discount * (rewards[j] + self.gamma*values[j+1] * (1 - self.current_path[j][4]) \
+                        - values[j])
                     discount *= self.gamma
                 
                 advantages[i] = a_t

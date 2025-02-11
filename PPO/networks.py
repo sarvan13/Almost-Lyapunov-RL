@@ -11,7 +11,6 @@ class ActorNet(nn.Module):
         self.lr = lr
         self.state_dims = state_dims
         self.action_dims = action_dims
-        self.max_action = torch.tensor(max_action)
         self.fc1_dims = fc1_dims
         self.fc2_dims = fc2_dims
         self.reparam_noise = reparam_noise
@@ -25,6 +24,7 @@ class ActorNet(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
         self.device = ('cuda:0' if torch.cuda.is_available() else 'cpu')
+        self.max_action = torch.tensor(max_action).to(self.device)
         self.to(self.device)
     
     def forward(self, state):

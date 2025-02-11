@@ -3,6 +3,7 @@ import gymnasium as gym
 import numpy as np
 from memory import Memory
 from networks import ActorNet, CriticNet
+from tqdm import tqdm
 
 class PPOAgent():
     def __init__(self, env_name, a_lr, c_lr, batch_size, 
@@ -43,30 +44,33 @@ class PPOAgent():
 
         state, _ = self.env.reset()
         done = False
-        while step < self.max_steps and curr_ep < self.max_episodes:
-            while self.memory.full == False:
-                action, log_prob = self.choose_action(state)
-                next_state, reward, terminated, truncated, _ = self.env.step(action)
-                done = terminated or truncated
-                value = self.critic(torch.tensor([state], dtype=torch.float))
-                self.memory.store((state, action, reward, next_state, done, log_prob, value), self.critic)
-                ep_rew += reward
 
-                if done:
-                    state, _ = self.env.reset()
-                    curr_ep += 1
-                    episode_rewards.append(ep_rew)
-                    ep_rew = 0
+        with tqdm(total=self.max_episodes) as pbar:
+            while step < self.max_steps and curr_ep < self.max_episodes:
+                while self.memory.full == False:
+                    action, log_prob = self.choose_action(state)
+                    next_state, reward, terminated, truncated, _ = self.env.step(action)
+                    done = terminated or truncated
+                    value = self.critic(torch.tensor([state], dtype=torch.float).to(self.policy.device))
+                    self.memory.store((state, action, reward, next_state, done, log_prob, value), self.critic)
+                    ep_rew += reward
+
+                    if done:
+                        state, _ = self.env.reset()
+                        curr_ep += 1
+                        episode_rewards.append(ep_rew)
+                        ep_rew = 0
+                        pbar.update(1)  # Update the progress bar
                 
-                step += 1
-                state = next_state
+                    step += 1
+                    state = next_state
         
-            for i in range(self.num_grad_updates):
-                policy_loss, value_loss = self.learn()
-                p_loss_arr.append(policy_loss)
-                v_loss_arr.append(value_loss)
-            
-            self.memory.clear()
+                for i in range(self.num_grad_updates):
+                    policy_loss, value_loss = self.learn()
+                    p_loss_arr.append(policy_loss)
+                    v_loss_arr.append(value_loss)
+                
+                self.memory.clear()
 
         return episode_rewards, p_loss_arr, v_loss_arr
     
