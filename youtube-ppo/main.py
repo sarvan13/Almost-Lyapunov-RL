@@ -15,7 +15,7 @@ if __name__ == '__main__':
                     alpha=alpha, n_epochs=n_epochs, 
                     input_dims=env.observation_space.shape[0],
                     max_action=env.action_space.high)
-    n_games = 500
+    n_games = 2000
 
     figure_file = 'plots/cartpole.png'
     score_history = []
@@ -46,7 +46,7 @@ if __name__ == '__main__':
             observation = observation_
         agent.actor.decay_covariance(n_games)
         score_history.append(score)
-        std.append(agent.actor.cov_var[0])
+        std.append(agent.actor.cov_var[0].item())
         avg_score = np.mean(score_history[-100:])
 
         print('episode', i, 'score %.1f' % score, 'avg score %.1f' % avg_score,
