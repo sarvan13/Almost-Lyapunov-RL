@@ -13,6 +13,7 @@ class PPOMemory:
         self.vals = []
         self.actions = []
         self.rewards = []
+        self.next_states = []
         self.dones = []
 
         self.batch_size = batch_size
@@ -29,15 +30,17 @@ class PPOMemory:
                 np.array(self.probs),\
                 np.array(self.vals),\
                 np.array(self.rewards),\
+                np.array(self.next_states),\
                 np.array(self.dones),\
                 batches
 
-    def store_memory(self, state, action, probs, vals, reward, done):
+    def store_memory(self, state, action, probs, vals, reward, next_state, done):
         self.states.append(state)
         self.actions.append(action)
         self.probs.append(probs)
         self.vals.append(vals)
         self.rewards.append(reward)
+        self.next_states.append(next_state)
         self.dones.append(done)
 
     def clear_memory(self):
@@ -45,12 +48,13 @@ class PPOMemory:
         self.probs = []
         self.actions = []
         self.rewards = []
+        self.next_states = []
         self.dones = []
         self.vals = []
 
 class ActorNet(nn.Module):
     def __init__(self, state_dims, action_dims, max_action, lr=3e-4, fc1_dims=256, fc2_dims=256, 
-                 reparam_noise=1e-6, name='PPOActor.pth', save_dir='data/cartpole/models'):
+                 reparam_noise=1e-6, name='PPOActor.pth', save_dir='tmp\ppo'):
         super(ActorNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
@@ -125,10 +129,10 @@ class ActorNet(nn.Module):
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_dims, alpha, fc1_dims=256, fc2_dims=256,
-            chkpt_dir='tmp/ppo'):
+            chkpt_dir='tmp\ppo', name='critic'):
         super(CriticNetwork, self).__init__()
 
-        self.checkpoint_file = os.path.join(chkpt_dir, 'critic_T_ppo')
+        self.checkpoint_file = os.path.join(chkpt_dir, name)
         self.critic = nn.Sequential(
                 nn.Linear(input_dims, fc1_dims),
                 nn.ReLU(),
@@ -159,23 +163,28 @@ class Agent:
         self.policy_clip = policy_clip
         self.n_epochs = n_epochs
         self.gae_lambda = gae_lambda
+        self.input_dims = input_dims
+        self.beta = 0.5
 
         self.actor = ActorNet(input_dims,n_actions, max_action, lr=alpha)
         self.critic = CriticNetwork(input_dims, alpha)
+        self.lyapunov = CriticNetwork(input_dims, alpha, name='lyapunov')
         self.memory = PPOMemory(batch_size)
        
-    def remember(self, state, action, probs, vals, reward, done):
-        self.memory.store_memory(state, action, probs, vals, reward, done)
+    def remember(self, state, action, probs, vals, reward, next_state, done):
+        self.memory.store_memory(state, action, probs, vals, reward, next_state, done)
 
     def save_models(self):
         print('... saving models ...')
         self.actor.save_checkpoint()
         self.critic.save_checkpoint()
+        self.lyapunov.save_checkpoint()
 
     def load_models(self):
         print('... loading models ...')
         self.actor.load_checkpoint()
         self.critic.load_checkpoint()
+        self.lyapunov.load_checkpoint()
 
     def choose_action(self, observation):
         state = T.tensor([observation], dtype=T.float).to(self.actor.device)
@@ -188,6 +197,33 @@ class Agent:
         value = T.squeeze(value).item()
 
         return action, probs, value
+    
+    def train_lyapunov(self):
+        lyapunov_loss = []
+        for i in range(self.n_epochs):
+            loss_arr = []
+            state_arr, action_arr, old_prob_arr, vals_arr,\
+            reward_arr, next_state_arr, dones_arr, batches = \
+                    self.memory.generate_batches()
+            
+            for batch in batches:
+                states = T.tensor(state_arr[batch], dtype=T.float).to(self.actor.device)
+                next_states = T.tensor(next_state_arr[batch], dtype=T.float).to(self.actor.device)
+
+                lyapunov_values = self.lyapunov(states)
+                lie_derivative = self.lyapunov(next_states) - lyapunov_values
+                equilibrium_lyapunov = self.lyapunov(T.zeros(self.input_dims).to(self.actor.device))
+
+                loss = T.max(T.tensor(0), -lyapunov_values).mean() + T.max(T.tensor(0), lie_derivative).mean() + equilibrium_lyapunov**2
+
+                self.lyapunov.optimizer.zero_grad()
+                loss.backward()
+                self.lyapunov.optimizer.step()       
+                loss_arr.append(loss.item())
+            
+            lyapunov_loss.append(np.mean(loss_arr))
+        
+        return np.mean(lyapunov_loss)
 
     def learn(self):
         actor_losses = []
@@ -196,12 +232,13 @@ class Agent:
             mean_actor_loss = []
             mean_critic_loss = []
             state_arr, action_arr, old_prob_arr, vals_arr,\
-            reward_arr, dones_arr, batches = \
+            reward_arr, next_state_arr, dones_arr, batches = \
                     self.memory.generate_batches()
 
             values = vals_arr
-            advantage = np.zeros(len(reward_arr), dtype=np.float32)
 
+            # calculate advantages
+            advantage = np.zeros(len(reward_arr), dtype=np.float32)
             for t in range(len(reward_arr)-1):
                 discount = 1
                 a_t = 0
@@ -209,6 +246,7 @@ class Agent:
                     a_t += discount*(reward_arr[k] + self.gamma*values[k+1]*\
                             (1-int(dones_arr[k])) - values[k])
                     discount *= self.gamma*self.gae_lambda
+                # advantage[t] = a_t
                 advantage[t] = a_t
             advantage = T.tensor(advantage).to(self.actor.device)
 
@@ -217,6 +255,7 @@ class Agent:
                 states = T.tensor(state_arr[batch], dtype=T.float).to(self.actor.device)
                 old_probs = T.tensor(old_prob_arr[batch]).to(self.actor.device)
                 actions = T.tensor(action_arr[batch]).to(self.actor.device)
+                next_states = T.tensor(next_state_arr[batch], dtype=T.float).to(self.actor.device)
 
                 dist = self.actor(states)
                 critic_value = self.critic(states)
@@ -226,7 +265,8 @@ class Agent:
                 new_probs = self.actor.get_log_prob(states, actions)
                 prob_ratio = new_probs.exp() / old_probs.exp()
                 #prob_ratio = (new_probs - old_probs).exp()
-                weighted_probs = advantage[batch] * prob_ratio
+                adjusted_advantage = advantage[batch] + T.min(T.tensor(0), self.lyapunov(next_states) - self.lyapunov(states))
+                weighted_probs = adjusted_advantage * prob_ratio
                 weighted_clipped_probs = T.clamp(prob_ratio, 1-self.policy_clip,
                         1+self.policy_clip)*advantage[batch]
                 actor_loss = -T.min(weighted_probs, weighted_clipped_probs).mean()

@@ -6,26 +6,28 @@ import torch as T
 import copy
 
 if __name__ == '__main__':
-    env = gym.make('InvertedPendulum-v5')
-    N = 100
-    batch_size = 20
-    n_epochs = 5
+    env = gym.make('Pendulum-v1')
+    N = 20
+    batch_size = 5
+    n_epochs = 4
     alpha = 0.0003
     agent = Agent(n_actions=env.action_space.shape[0], batch_size=batch_size, 
                     alpha=alpha, n_epochs=n_epochs, 
                     input_dims=env.observation_space.shape[0],
                     max_action=env.action_space.high)
-    n_games = 2000
+    n_games = 1500
 
     figure_file = 'plots/cartpole.png'
     score_history = []
     actor_loss = []
     critic_loss = []
+    lyapunov_loss = []
     std = []
 
     learn_iters = 0
     avg_score = 0
     n_steps = 0
+    best_score = -2000
 
     for i in range(n_games):
         observation, _ = env.reset()
@@ -37,11 +39,13 @@ if __name__ == '__main__':
             done = terminated or truncated
             n_steps += 1
             score += reward
-            agent.remember(observation, action, prob, val, reward, done)
+            agent.remember(observation, action, prob, val, reward, observation_, done)
             if n_steps % N == 0:
+                l_loss = agent.train_lyapunov()
                 a_loss, c_loss = agent.learn()
                 actor_loss.append(a_loss)
                 critic_loss.append(c_loss)
+                lyapunov_loss.append(l_loss)
                 learn_iters += 1
             observation = observation_
         agent.actor.decay_covariance(n_games)
@@ -51,6 +55,10 @@ if __name__ == '__main__':
 
         print('episode', i, 'score %.1f' % score, 'avg score %.1f' % avg_score,
                 'time_steps', n_steps, 'learning_steps', learn_iters)
+        
+        if avg_score > best_score:
+            best_score = avg_score
+            agent.save_models()
     
     plt.plot(np.arange(len(score_history)), score_history)
     plt.plot(np.arange(len(score_history)), 1000*np.array(std))
@@ -67,4 +75,9 @@ if __name__ == '__main__':
     plt.plot(loss_steps, critic_loss)
     plt.xlabel("Time Steps")
     plt.ylabel("Value Loss")
+    plt.show()
+    
+    plt.plot(loss_steps, lyapunov_loss)
+    plt.xlabel("Time Steps")
+    plt.ylabel("Lyapunov Loss")
     plt.show()
