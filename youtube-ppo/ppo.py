@@ -54,7 +54,7 @@ class PPOMemory:
 
 class ActorNet(nn.Module):
     def __init__(self, state_dims, action_dims, max_action, lr=3e-4, fc1_dims=256, fc2_dims=256, 
-                 reparam_noise=1e-6, name='PPOActor.pth', save_dir='tmp/ppo'):
+                 reparam_noise=1e-6, name='PPOActor.pth', save_dir='tmp\ppo'):
         super(ActorNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
@@ -129,7 +129,7 @@ class ActorNet(nn.Module):
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_dims, alpha, fc1_dims=256, fc2_dims=256,
-            chkpt_dir='tmp/ppo', name='critic'):
+            chkpt_dir='tmp\ppo', name='critic'):
         super(CriticNetwork, self).__init__()
 
         self.checkpoint_file = os.path.join(chkpt_dir, name)

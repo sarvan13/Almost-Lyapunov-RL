@@ -33,7 +33,7 @@ agent.load_models()
 #         observation = observation_
 
 # Parameters
-num_episodes = 5  # Number of episodes to simulate
+num_episodes = 1  # Number of episodes to simulate
 steps_per_episode = 200  # Number of steps per episode
 
 # Function to run an episode and collect data
@@ -63,7 +63,7 @@ for i, (theta_list, theta_dot_list) in enumerate(trajectories):
     plt.plot(theta_list, theta_dot_list, label=f'Episode {i+1}')
 plt.xlabel("Theta (rad)")
 plt.ylabel("Theta dot (rad/s)")
-plt.title("Phase Portraits of Pendulum-v1 Across Multiple Episodes")
+plt.title("Phase Portraits of Pendulum for LY")
 plt.legend()
 plt.grid(True)
 plt.show()
