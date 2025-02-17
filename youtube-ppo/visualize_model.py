@@ -11,7 +11,7 @@ batch_size = 5
 n_epochs = 4
 alpha = 0.0003
 agent = Agent(n_actions=env.action_space.shape[0], batch_size=batch_size, 
-                alpha=alpha, n_epochs=n_epochs, 
+                alpha=alpha, n_epochs=n_epochs, dt=0.05, 
                 input_dims=env.observation_space.shape[0],
                 max_action=env.action_space.high)
 agent.load_models()

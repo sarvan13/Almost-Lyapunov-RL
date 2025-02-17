@@ -7,15 +7,15 @@ import copy
 
 if __name__ == '__main__':
     env = gym.make('Pendulum-v1')
-    N = 20
-    batch_size = 5
-    n_epochs = 4
+    N = 2048
+    batch_size = 64
+    n_epochs = 10
     alpha = 0.0003
     agent = Agent(n_actions=env.action_space.shape[0], batch_size=batch_size, 
-                    alpha=alpha, n_epochs=n_epochs, 
+                    alpha=alpha, n_epochs=n_epochs, dt=env.unwrapped.dt,
                     input_dims=env.observation_space.shape[0],
                     max_action=env.action_space.high)
-    n_games = 1500
+    n_games = 500
 
     figure_file = 'plots/cartpole.png'
     score_history = []
@@ -46,7 +46,7 @@ if __name__ == '__main__':
                 actor_loss.append(a_loss)
                 critic_loss.append(c_loss)
                 lyapunov_loss.append(l_loss)
-                learn_iters += 1
+                learn_iters += 10
             observation = observation_
         agent.actor.decay_covariance(n_games)
         score_history.append(score)
@@ -81,3 +81,5 @@ if __name__ == '__main__':
     plt.xlabel("Time Steps")
     plt.ylabel("Lyapunov Loss")
     plt.show()
+
+    np.save('ly2-reward-batch.npy', score_history)

@@ -54,7 +54,7 @@ class PPOMemory:
 
 class ActorNet(nn.Module):
     def __init__(self, state_dims, action_dims, max_action, lr=3e-4, fc1_dims=256, fc2_dims=256, 
-                 reparam_noise=1e-6, name='PPOActor.pth', save_dir='tmp\ppo'):
+                 reparam_noise=1e-6, name='actor2-batch.pth', save_dir='tmp/ppo'):
         super(ActorNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
@@ -75,7 +75,7 @@ class ActorNet(nn.Module):
         self.max_action = T.tensor(max_action).to(self.device)
         self.initial_cov_var = T.full(size=(self.action_dims,), fill_value=0.5)
         self.cov_var = T.full(size=(self.action_dims,), fill_value=0.5)
-        self.final_cov_var = 0.3
+        self.final_cov_var = 0.2
         self.cov_mat = T.diag(self.initial_cov_var).to(self.device)
         self.to(self.device)
     
@@ -129,7 +129,7 @@ class ActorNet(nn.Module):
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_dims, alpha, fc1_dims=256, fc2_dims=256,
-            chkpt_dir='tmp\ppo', name='critic'):
+            chkpt_dir='tmp/ppo', name='critic2-batch.pth'):
         super(CriticNetwork, self).__init__()
 
         self.checkpoint_file = os.path.join(chkpt_dir, name)
@@ -157,18 +157,21 @@ class CriticNetwork(nn.Module):
         self.load_state_dict(T.load(self.checkpoint_file))
 
 class Agent:
-    def __init__(self, n_actions, input_dims, max_action, gamma=0.99, alpha=0.0003, gae_lambda=0.95,
+    def __init__(self, n_actions, input_dims, max_action, dt, gamma=0.99, alpha=0.0003, gae_lambda=0.95,
             policy_clip=0.2, batch_size=64, n_epochs=10):
         self.gamma = gamma
         self.policy_clip = policy_clip
         self.n_epochs = n_epochs
         self.gae_lambda = gae_lambda
         self.input_dims = input_dims
+        self.dt = dt
         self.beta = 0.5
+        self.entropy_coeff = 0.0
+        self.target_kl = 0.01
 
         self.actor = ActorNet(input_dims,n_actions, max_action, lr=alpha)
         self.critic = CriticNetwork(input_dims, alpha)
-        self.lyapunov = CriticNetwork(input_dims, alpha, name='lyapunov')
+        self.lyapunov = CriticNetwork(input_dims, alpha, name='lyapunov2-batch.pth')
         self.memory = PPOMemory(batch_size)
        
     def remember(self, state, action, probs, vals, reward, next_state, done):
@@ -211,7 +214,7 @@ class Agent:
                 next_states = T.tensor(next_state_arr[batch], dtype=T.float).to(self.actor.device)
 
                 lyapunov_values = self.lyapunov(states)
-                lie_derivative = self.lyapunov(next_states) - lyapunov_values
+                lie_derivative = (self.lyapunov(next_states) - lyapunov_values)#/self.dt
                 equilibrium_lyapunov = self.lyapunov(T.zeros(self.input_dims).to(self.actor.device))
 
                 loss = T.max(T.tensor(0), -lyapunov_values).mean() + T.max(T.tensor(0), lie_derivative).mean() + equilibrium_lyapunov**2
@@ -229,8 +232,10 @@ class Agent:
         actor_losses = []
         critic_losses = []
         for _ in range(self.n_epochs):
+            approx_kl_divs = []
             mean_actor_loss = []
             mean_critic_loss = []
+            continue_training = True
             state_arr, action_arr, old_prob_arr, vals_arr,\
             reward_arr, next_state_arr, dones_arr, batches = \
                     self.memory.generate_batches()
@@ -257,7 +262,6 @@ class Agent:
                 actions = T.tensor(action_arr[batch]).to(self.actor.device)
                 next_states = T.tensor(next_state_arr[batch], dtype=T.float).to(self.actor.device)
 
-                dist = self.actor(states)
                 critic_value = self.critic(states)
 
                 critic_value = T.squeeze(critic_value)
@@ -265,17 +269,32 @@ class Agent:
                 new_probs = self.actor.get_log_prob(states, actions)
                 prob_ratio = new_probs.exp() / old_probs.exp()
                 #prob_ratio = (new_probs - old_probs).exp()
-                adjusted_advantage = advantage[batch] + T.min(T.tensor(0), self.lyapunov(next_states) - self.lyapunov(states))
+                adjusted_advantage = (1- self.beta) * advantage[batch] + self.beta * T.min(T.tensor(0), -(self.lyapunov(next_states) - self.lyapunov(states)))
+                # adjusted_advantage = advantage[batch]
                 weighted_probs = adjusted_advantage * prob_ratio
                 weighted_clipped_probs = T.clamp(prob_ratio, 1-self.policy_clip,
-                        1+self.policy_clip)*advantage[batch]
+                        1+self.policy_clip)*adjusted_advantage
                 actor_loss = -T.min(weighted_probs, weighted_clipped_probs).mean()
+
+                # entropy loss
+                entropy = -T.mean(-new_probs)
 
                 returns = advantage[batch] + values[batch]
                 critic_loss = (returns-critic_value)**2
                 critic_loss = critic_loss.mean()
 
-                total_loss = actor_loss + 0.5*critic_loss
+                total_loss = actor_loss + 0.5*critic_loss + self.entropy_coeff*entropy
+
+                # with T.no_grad():
+                #     log_ratio = new_probs - old_probs
+                #     approx_kl_div = T.mean((T.exp(log_ratio) - 1) - log_ratio).cpu().numpy()
+                #     approx_kl_divs.append(approx_kl_div)
+
+                # if self.target_kl is not None and approx_kl_div > 1.5 * self.target_kl:
+                #     continue_training = False
+                #     # print(f"Early stopping due to reaching max kl: {approx_kl_div:.2f}")
+                #     break
+ 
                 self.actor.optimizer.zero_grad()
                 self.critic.optimizer.zero_grad()
                 total_loss.backward()
@@ -284,6 +303,9 @@ class Agent:
 
                 mean_actor_loss.append(actor_loss.item())
                 mean_critic_loss.append(critic_loss.item())
+
+            if not continue_training:
+                break
 
             actor_losses.append(np.mean(mean_actor_loss))
             critic_losses.append(np.mean(mean_critic_loss))
