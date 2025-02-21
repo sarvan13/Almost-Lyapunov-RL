@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
+import numpy as np
 from .networks import ActorNet, QNet, ValueNet, LyapunovNet
 import gymnasium as gym
 from collections import deque, namedtuple
@@ -15,8 +16,13 @@ class LSACAgent():
         self.value_target = ValueNet(vlr, state_dims)
         self.lyapunov = LyapunovNet(llr, state_dims, action_dims)
         self.value_target.load_state_dict(self.value.state_dict())
+        self.state_dims = state_dims
+        self.action_dims = action_dims
+        self.dt = 0.05
+        # self.equilibrium_action = torch.tensor(torch.zeros(action_dims), dtype=torch.float, requires_grad=True).to(self.actor.device)
 
         self.max_action = max_action
+        self.beta = 0.9
         
         self.mem_length = mem_length
         self.replay_buffer = []
@@ -52,19 +58,51 @@ class LSACAgent():
 
         return action.cpu().detach().numpy()[0]
     
+    def learn_lyapunov(self, batch_size=256):
+        if len(self.replay_buffer) < batch_size:
+            return
+        
+        batch = random.sample(self.replay_buffer, batch_size)
+
+        states, actions, rewards, next_states, dones = zip(*batch)
+
+        states = torch.tensor(states, dtype=torch.float).to(self.lyapunov.device)
+        actions = torch.tensor(actions, dtype=torch.float).to(self.lyapunov.device)
+        rewards = torch.tensor(rewards, dtype=torch.float).to(self.lyapunov.device)
+        next_states = torch.tensor(next_states, dtype=torch.float).to(self.lyapunov.device)
+        dones = torch.tensor(dones, dtype=torch.float).to(self.lyapunov.device)
+
+        
+        next_actions, _ = self.actor.sample(next_states, False)
+        eq_state = torch.tensor([np.zeros(self.state_dims)], dtype=torch.float).to(self.actor.device)
+        eq_action, _ = self.actor.sample(eq_state, False)
+
+        lyapunov_values = self.lyapunov(states, actions)
+        lie_derivative = (self.lyapunov(next_states, next_actions) - lyapunov_values)
+        equilibrium_lyapunov = self.lyapunov(eq_state, eq_action)
+
+        loss = torch.max(torch.tensor(0), -lyapunov_values).mean() + torch.max(torch.tensor(0), lie_derivative/self.dt).mean() + equilibrium_lyapunov**2
+
+        self.lyapunov.optimizer.zero_grad()
+        loss.backward()
+        self.lyapunov.optimizer.step()
+
+        return loss
+
+
+
     def train(self, batch_size=256):
         if len(self.replay_buffer) < batch_size:
             return
         
         batch = random.sample(self.replay_buffer, batch_size)
 
-        states, actions, rewards, next_states, log_pis, dones = zip(*batch)
+        states, actions, rewards, next_states, dones = zip(*batch)
 
         states = torch.tensor(states, dtype=torch.float).to(self.actor.device)
         actions = torch.tensor(actions, dtype=torch.float).to(self.actor.device)
         rewards = torch.tensor(rewards, dtype=torch.float).to(self.actor.device)
         next_states = torch.tensor(next_states, dtype=torch.float).to(self.actor.device)
-        log_pis = torch.tensor(log_pis, dtype=torch.float).to(self.actor.device)
         dones = torch.tensor(dones, dtype=torch.float).to(self.actor.device)
 
         # Train Value Network
@@ -79,12 +117,21 @@ class LSACAgent():
         self.value.optimizer.step()
 
         #Train Actor Network
-        # error = log(pi(a|s)) - q(s,a)
+        # error = log(pi(a|s)) - q(s,a) + max(0, L' - L)
         self.actor.optimizer.zero_grad()
         sampled_actions, log_probs = self.actor.sample(states, reparameterize=True)
         q_actor = self.q.forward(states, sampled_actions).view(-1)
+
+        next_actions, _ = self.actor.sample(next_states, False)
+        eq_state = torch.tensor([np.zeros(self.state_dims)], dtype=torch.float).to(self.actor.device)
+        eq_action, _ = self.actor.sample(eq_state, False)
+        lie_derivative = (self.lyapunov.forward(next_states, next_actions) - self.lyapunov.forward(states, actions).detach())/self.dt
+        l_equi = self.lyapunov.forward(eq_state, eq_action)
+        lyapunov_error = torch.min(torch.tensor(0), -lie_derivative).mean() + l_equi**2
+        
         actor_loss = (log_probs.view(-1) - q_actor).mean()
-        actor_loss.backward()
+        loss = (1-self.beta)*actor_loss + self.beta*lyapunov_error
+        loss.backward()
         self.actor.optimizer.step()
 
         # Train Q Network
@@ -101,9 +148,10 @@ class LSACAgent():
 
         # Update V Target Network
         # Update the target value network
-
         for target_param, param in zip(self.value_target.parameters(), self.value.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        
+        return v_loss, loss, q_loss
 
 
 

@@ -6,7 +6,7 @@ from torch.distributions import Normal
 
 class ActorNet(nn.Module):
     def __init__(self, lr, state_dims, action_dims, max_action, fc1_dims=256, fc2_dims=256, 
-                 reparam_noise=1e-6, name='lsac-pendulum-actor.pth', save_dir='data\cartpole\models'):
+                 reparam_noise=1e-6, name='lsac-pendulum-actor.pth', save_dir='data\pendulum\models'):
         super(ActorNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
@@ -57,6 +57,15 @@ class ActorNet(nn.Module):
     
     def load(self):
         self.load_state_dict(torch.load(self.save_path))
+    
+    # def get_log_prob(self, state, action):
+    #     mean, std = self.forward(state)
+    #     normal = Normal(mean, std)
+
+    #     tanh_action = action / self.max_action
+    #     sampled_action = torch.atanh(tanh_action)
+    #     log_prob = normal.log_prob(sampled_action) - torch.log(self.max_action*(1 - tanh_action.pow(2)) + self.reparam_noise)
+    #     return log_prob.sum(dim=1, keepdim=True)
     
 class QNet(nn.Module):
     def __init__(self, lr, state_dims, action_dims, fc1_dims=256, fc2_dims=256, 
@@ -124,29 +133,31 @@ class ValueNet(nn.Module):
         self.load_state_dict(torch.load(self.save_path))
 
 class LyapunovNet(nn.Module):
-    def __init__(self, lr, state_dims, fc1_dims=256, fc2_dims=256, name='lsac-pendulum-l.pth', save_dir='data\pendulum\models'):
+    def __init__(self, lr, state_dims, action_dims, fc1_dims=256, fc2_dims=256, name='lsac-pendulum-l.pth', save_dir='data\pendulum\models'):
         super(LyapunovNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
+        self.action_dims = action_dims
         self.fc1_dims = fc1_dims
         self.fc2_dims = fc2_dims
         self.name = name
         self.save_path = os.path.join(save_dir, name)
 
-        self.fc1 = nn.Linear(self.state_dims, self.fc1_dims)
+        self.fc1 = nn.Linear(self.state_dims + self.action_dims, self.fc1_dims)
         self.fc2 = nn.Linear(self.fc1_dims, self.fc2_dims)
-        self.value = nn.Linear(self.fc2_dims, 1)
+        self.q = nn.Linear(self.fc2_dims, 1)
 
         self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
         self.device = ('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.to(self.device)
 
-    def forward(self, state):
-        layer1 = torch.relu(self.fc1(state))
+    def forward(self, state, action):
+        state_action = torch.cat([state, action], dim=1)
+        layer1 = torch.relu(self.fc1(state_action))
         layer2 = torch.relu(self.fc2(layer1))
-        value = self.value(layer2)
+        q_value = self.q(layer2)
 
-        return value
+        return q_value
     
     def save(self):
         torch.save(self.state_dict(), self.save_path)

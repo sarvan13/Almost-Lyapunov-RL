@@ -3,16 +3,16 @@ import torch
 
 import gymnasium as gym
 import env
-from sac.agent import SACAgent
+from lsac.agent import LSACAgent
 from tqdm import tqdm
 import numpy as np
 
 environment = gym.make('Pendulum-v1')
 print(environment.action_space.high)
-agent = SACAgent(environment.observation_space.shape[0], environment.action_space.shape[0], environment.action_space.high)
+agent = LSACAgent(environment.observation_space.shape[0], environment.action_space.shape[0], environment.action_space.high)
 
 state, info = environment.reset(seed=42)
-max_num_episodes = 500
+max_num_episodes = 100
 max_episode_length = 200
 cost_arr = []
 step_arr = []
@@ -20,7 +20,12 @@ steps_per_episode = []
 total_steps = 0
 longest_episode = 0
 
-for _ in tqdm(range(max_num_episodes)):
+lyapunov_loss = []
+q_loss = []
+v_loss = []
+actor_loss = []
+
+for k in (range(max_num_episodes)):
     episode_cost = 0
     episode_steps = 0
     for i in range(max_episode_length):
@@ -41,15 +46,27 @@ for _ in tqdm(range(max_num_episodes)):
     state, _ = environment.reset()
     
     for j in range(episode_steps):
-        agent.train()
+        l_loss = agent.learn_lyapunov()
+        losses = agent.train()
+        if losses is not None:
+            v, a, q = losses
+            lyapunov_loss.append(l_loss.item())
+            v_loss.append(v.item())
+            actor_loss.append(a.item())
+            q_loss.append(q.item())
     
     if episode_steps > longest_episode:
         longest_episode = episode_steps
 
+    print(f"Episode {k} - Cost: {episode_cost}")
     steps_per_episode.append(episode_steps)
     cost_arr.append(episode_cost)
     step_arr.append(total_steps)
 
-np.save("data\\pendulum\\arrays\\sac-pendulum-cost2-arr.npy", np.array(cost_arr))
-np.save("data\\pendulum\\arrays\\sac-pendulum-step2-arr.npy", np.array(step_arr))
+np.save("lsac-pendulum-cost2-arr.npy", np.array(cost_arr))
+np.save("lsac-pendulum-step2-arr.npy", np.array(step_arr))
+np.save("lsac-pendulum-lyapunov-loss2-arr.npy", np.array(lyapunov_loss))
+np.save("lsac-pendulum-v-loss2-arr.npy", np.array(v_loss))
+np.save("lsac-pendulum-q-loss2-arr.npy", np.array(q_loss))
+np.save("lsac-pendulum-actor-loss2-arr.npy", np.array(actor_loss))
 agent.save()

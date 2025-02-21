@@ -9,15 +9,15 @@ import matplotlib.pyplot as plt
 # # Calculate the moving average of the last 20 rewards for each entry
 # moving_avg_rewards = [np.mean(rewards[max(0, i-20):i+1]) for i in range(len(rewards))]
 
-ppo_rewards =np.load('ppo-rew-batch.npy')
-moving_avg_rewards = [np.mean(ppo_rewards[max(0, i-20):i+1]) for i in range(len(ppo_rewards))]
+# ppo_rewards =np.load('ppo-rew-batch.npy')
+# moving_avg_rewards = [np.mean(ppo_rewards[max(0, i-20):i+1]) for i in range(len(ppo_rewards))]
 
-ly_rewards = np.load('ly2-reward-batch.npy')
+ly_rewards = np.load('lsac-pendulum-lyapunov-loss2-arr.npy')
 moving_avg_rewards2 = [np.mean(ly_rewards[max(0, i-20):i+1]) for i in range(len(ly_rewards))]
 
 # Plot the rewards
 plt.figure(figsize=(10, 5))
-plt.plot(moving_avg_rewards)
+#plt.plot(moving_avg_rewards)
 plt.plot(moving_avg_rewards2)
 plt.xlabel("Timesteps")
 plt.ylabel("Reward")
