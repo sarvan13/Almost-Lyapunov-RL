@@ -19,6 +19,7 @@ class LSACAgent():
         self.state_dims = state_dims
         self.action_dims = action_dims
         self.dt = 0.05
+        self.equilibrium_state = torch.tensor([np.array([np.cos(0), np.sin(0), 0])], dtype=torch.float).to(self.actor.device)
         # self.equilibrium_action = torch.tensor(torch.zeros(action_dims), dtype=torch.float, requires_grad=True).to(self.actor.device)
 
         self.max_action = max_action
@@ -41,11 +42,13 @@ class LSACAgent():
         self.value.save()
         self.value_target.save()
         self.q.save()
+        self.lyapunov.save()
     def load(self):
         self.actor.load()
         self.value.load()
         self.value_target.load()
         self.q.load()
+        self.lyapunov.load()
 
     def remember(self, data_point):
         self.replay_buffer.append(data_point)
@@ -74,14 +77,13 @@ class LSACAgent():
 
         
         next_actions, _ = self.actor.sample(next_states, False)
-        eq_state = torch.tensor([np.zeros(self.state_dims)], dtype=torch.float).to(self.actor.device)
-        eq_action, _ = self.actor.sample(eq_state, False)
+        eq_action, _ = self.actor.forward(self.equilibrium_state)
 
         lyapunov_values = self.lyapunov(states, actions)
         lie_derivative = (self.lyapunov(next_states, next_actions) - lyapunov_values)
-        equilibrium_lyapunov = self.lyapunov(eq_state, eq_action)
+        equilibrium_lyapunov = self.lyapunov(self.equilibrium_state, eq_action)
 
-        loss = torch.max(torch.tensor(0), -lyapunov_values).mean() + torch.max(torch.tensor(0), lie_derivative/self.dt).mean() + equilibrium_lyapunov**2
+        loss = torch.max(torch.tensor(0), -lyapunov_values).mean() + torch.max(torch.tensor(0), lie_derivative/self.dt + 0.01).mean() + equilibrium_lyapunov**2
 
         self.lyapunov.optimizer.zero_grad()
         loss.backward()
@@ -123,10 +125,9 @@ class LSACAgent():
         q_actor = self.q.forward(states, sampled_actions).view(-1)
 
         next_actions, _ = self.actor.sample(next_states, False)
-        eq_state = torch.tensor([np.zeros(self.state_dims)], dtype=torch.float).to(self.actor.device)
-        eq_action, _ = self.actor.sample(eq_state, False)
-        lie_derivative = (self.lyapunov.forward(next_states, next_actions) - self.lyapunov.forward(states, actions).detach())/self.dt
-        l_equi = self.lyapunov.forward(eq_state, eq_action)
+        eq_action, _ = self.actor.forward(self.equilibrium_state)
+        lie_derivative = (self.lyapunov.forward(next_states, next_actions) - self.lyapunov.forward(states, actions).detach())/self.dt + 0.1
+        l_equi = self.lyapunov.forward(self.equilibrium_state, eq_action)
         lyapunov_error = torch.min(torch.tensor(0), -lie_derivative).mean() + l_equi**2
         
         actor_loss = (log_probs.view(-1) - q_actor).mean()

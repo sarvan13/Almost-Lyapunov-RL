@@ -12,16 +12,38 @@ import matplotlib.pyplot as plt
 # ppo_rewards =np.load('ppo-rew-batch.npy')
 # moving_avg_rewards = [np.mean(ppo_rewards[max(0, i-20):i+1]) for i in range(len(ppo_rewards))]
 
-ly_rewards = np.load('lsac-pendulum-lyapunov-loss2-arr.npy')
+ly_rewards = np.load('lsac-pendulum-cost2-arr.npy')
 moving_avg_rewards2 = [np.mean(ly_rewards[max(0, i-20):i+1]) for i in range(len(ly_rewards))]
+
+ly_actor_loss = np.load('lsac-pendulum-actor-loss2-arr.npy')
+ly_lyapunov_loss = np.load('lsac-pendulum-lyapunov-loss2-arr.npy')
 
 # Plot the rewards
 plt.figure(figsize=(10, 5))
-#plt.plot(moving_avg_rewards)
 plt.plot(moving_avg_rewards2)
 plt.xlabel("Timesteps")
 plt.ylabel("Reward")
 plt.title("Training Rewards for PPO on Pendulum-v1")
+plt.grid(True)
+
+# Save the plot to a file
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(ly_actor_loss)
+plt.xlabel("Timesteps")
+plt.ylabel("loss")
+plt.title("Actor")
+plt.grid(True)
+
+# Save the plot to a file
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(ly_lyapunov_loss)
+plt.xlabel("Timesteps")
+plt.ylabel("loss")
+plt.title("Lyapunov")
 plt.grid(True)
 
 # Save the plot to a file

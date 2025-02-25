@@ -12,7 +12,7 @@ print(environment.action_space.high)
 agent = LSACAgent(environment.observation_space.shape[0], environment.action_space.shape[0], environment.action_space.high)
 
 state, info = environment.reset(seed=42)
-max_num_episodes = 100
+max_num_episodes = 1000
 max_episode_length = 200
 cost_arr = []
 step_arr = []

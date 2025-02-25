@@ -54,7 +54,7 @@ class PPOMemory:
 
 class ActorNet(nn.Module):
     def __init__(self, state_dims, action_dims, max_action, lr=3e-4, fc1_dims=256, fc2_dims=256, 
-                 reparam_noise=1e-6, name='ppo-actor.pth', save_dir='tmp/ppo'):
+                 reparam_noise=1e-6, name='actor2-batch.pth', save_dir='tmp\\ppo'):
         super(ActorNet, self).__init__()
         self.lr = lr
         self.state_dims = state_dims
@@ -129,7 +129,7 @@ class ActorNet(nn.Module):
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_dims, alpha, fc1_dims=256, fc2_dims=256,
-            chkpt_dir='tmp/ppo', name='ppo-critic.pth'):
+            chkpt_dir='tmp\\ppo', name='critic2-batch.pth'):
         super(CriticNetwork, self).__init__()
 
         self.checkpoint_file = os.path.join(chkpt_dir, name)
@@ -156,7 +156,7 @@ class CriticNetwork(nn.Module):
     def load_checkpoint(self):
         self.load_state_dict(T.load(self.checkpoint_file))
 
-class PPOAgent:
+class Agent:
     def __init__(self, n_actions, input_dims, max_action, dt, gamma=0.99, alpha=0.0003, gae_lambda=0.95,
             policy_clip=0.2, batch_size=64, n_epochs=10):
         self.gamma = gamma
@@ -171,6 +171,7 @@ class PPOAgent:
 
         self.actor = ActorNet(input_dims,n_actions, max_action, lr=alpha)
         self.critic = CriticNetwork(input_dims, alpha)
+        self.lyapunov = CriticNetwork(input_dims, alpha, name='lyapunov2-batch.pth')
         self.memory = PPOMemory(batch_size)
        
     def remember(self, state, action, probs, vals, reward, next_state, done):
@@ -180,11 +181,13 @@ class PPOAgent:
         print('... saving models ...')
         self.actor.save_checkpoint()
         self.critic.save_checkpoint()
+        self.lyapunov.save_checkpoint()
 
     def load_models(self):
         print('... loading models ...')
         self.actor.load_checkpoint()
         self.critic.load_checkpoint()
+        self.lyapunov.load_checkpoint()
 
     def choose_action(self, observation):
         state = T.tensor([observation], dtype=T.float).to(self.actor.device)
@@ -198,6 +201,33 @@ class PPOAgent:
 
         return action, probs, value
     
+    def train_lyapunov(self):
+        lyapunov_loss = []
+        for i in range(self.n_epochs):
+            loss_arr = []
+            state_arr, action_arr, old_prob_arr, vals_arr,\
+            reward_arr, next_state_arr, dones_arr, batches = \
+                    self.memory.generate_batches()
+            
+            for batch in batches:
+                states = T.tensor(state_arr[batch], dtype=T.float).to(self.actor.device)
+                next_states = T.tensor(next_state_arr[batch], dtype=T.float).to(self.actor.device)
+
+                lyapunov_values = self.lyapunov(states)
+                lie_derivative = (self.lyapunov(next_states) - lyapunov_values)#/self.dt
+                equilibrium_lyapunov = self.lyapunov(T.zeros(self.input_dims).to(self.actor.device))
+
+                loss = T.max(T.tensor(0), -lyapunov_values).mean() + T.max(T.tensor(0), lie_derivative).mean() + equilibrium_lyapunov**2
+
+                self.lyapunov.optimizer.zero_grad()
+                loss.backward()
+                self.lyapunov.optimizer.step()       
+                loss_arr.append(loss.item())
+            
+            lyapunov_loss.append(np.mean(loss_arr))
+        
+        return np.mean(lyapunov_loss)
+
     def learn(self):
         actor_losses = []
         critic_losses = []
@@ -239,7 +269,8 @@ class PPOAgent:
                 new_probs = self.actor.get_log_prob(states, actions)
                 prob_ratio = new_probs.exp() / old_probs.exp()
                 #prob_ratio = (new_probs - old_probs).exp()
-                adjusted_advantage = advantage[batch]
+                adjusted_advantage = (1- self.beta) * advantage[batch] + self.beta * T.min(T.tensor(0), -(self.lyapunov(next_states) - self.lyapunov(states)))
+                # adjusted_advantage = advantage[batch]
                 weighted_probs = adjusted_advantage * prob_ratio
                 weighted_clipped_probs = T.clamp(prob_ratio, 1-self.policy_clip,
                         1+self.policy_clip)*adjusted_advantage

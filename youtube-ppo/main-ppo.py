@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from ly import Agent
+from ppo import PPOAgent
 import matplotlib.pyplot as plt
 import torch as T
 import copy
@@ -11,17 +11,15 @@ if __name__ == '__main__':
     batch_size = 64
     n_epochs = 10
     alpha = 0.0003
-    agent = Agent(n_actions=env.action_space.shape[0], batch_size=batch_size, 
+    agent = PPOAgent(n_actions=env.action_space.shape[0], batch_size=batch_size, 
                     alpha=alpha, n_epochs=n_epochs, dt=env.unwrapped.dt,
                     input_dims=env.observation_space.shape[0],
                     max_action=env.action_space.high)
     n_games = 1000
 
-    figure_file = 'plots/cartpole.png'
     score_history = []
     actor_loss = []
     critic_loss = []
-    lyapunov_loss = []
     std = []
 
     learn_iters = 0
@@ -41,11 +39,9 @@ if __name__ == '__main__':
             score += reward
             agent.remember(observation, action, prob, val, reward, observation_, done)
             if n_steps % N == 0:
-                l_loss = agent.train_lyapunov()
                 a_loss, c_loss = agent.learn()
                 actor_loss.append(a_loss)
                 critic_loss.append(c_loss)
-                lyapunov_loss.append(l_loss)
                 learn_iters += 10
             observation = observation_
         agent.actor.decay_covariance(n_games)
@@ -76,10 +72,5 @@ if __name__ == '__main__':
     plt.xlabel("Time Steps")
     plt.ylabel("Value Loss")
     plt.show()
-    
-    plt.plot(loss_steps, lyapunov_loss)
-    plt.xlabel("Time Steps")
-    plt.ylabel("Lyapunov Loss")
-    plt.show()
 
-    np.save('ly2-reward-batch.npy', score_history)
+    np.save('ppo-reward.npy', score_history)

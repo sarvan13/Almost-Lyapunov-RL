@@ -31,8 +31,9 @@ agent.load()
 #         observation = observation_
 
 # Parameters
-num_episodes = 5  # Number of episodes to simulate
+num_episodes = 1  # Number of episodes to simulate
 steps_per_episode = 200  # Number of steps per episode
+lyapunov_arr = []
 
 # Function to run an episode and collect data
 def run_episode():
@@ -41,11 +42,16 @@ def run_episode():
     theta_dot_list = []
     for _ in range(steps_per_episode):
         action = agent.choose_action(obs)
+
+        with T.no_grad():
+            lyapunov_val = agent.lyapunov(T.tensor([obs], dtype=T.float).to(agent.actor.device), T.tensor([action], dtype=T.float).to(agent.actor.device))
+            lyapunov_arr.append(lyapunov_val.item())
+
         obs, _, terminated, truncated, _ = env.step(action)
         cos_theta, sin_theta, theta_dot = obs
         theta = np.arctan2(sin_theta, cos_theta)
         theta_list.append(theta)
-        theta_dot_list.append(theta_dot)
+        theta_dot_list.append(theta_dot)                    
         if terminated or truncated:
             break
     return theta_list, theta_dot_list
@@ -54,6 +60,13 @@ def run_episode():
 trajectories = [run_episode() for _ in range(num_episodes)]
 
 env.close()
+lyapunov_arr_avg = [np.mean(lyapunov_arr[max(0, i-5):i+1]) for i in range(len(lyapunov_arr))]
+plt.plot(lyapunov_arr_avg)
+plt.xlabel("Timesteps")
+plt.ylabel("Lyapunov Value")
+plt.title("Lyapunov Value over Time")
+plt.grid(True)
+plt.show()
 
 # Plot trajectories
 plt.figure(figsize=(10, 5))

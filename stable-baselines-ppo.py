@@ -38,7 +38,7 @@ reward_callback = RewardCallback()
 model = PPO('MlpPolicy', env, verbose=1)
 
 # Train the model
-num_episodes = 500
+num_episodes = 1000
 num_steps = 200 * num_episodes
 model.learn(total_timesteps=num_steps, callback=reward_callback)
 
@@ -54,7 +54,7 @@ plt.title("Training Rewards for PPO on Pendulum-v1")
 plt.grid(True)
 
 # Save the plot to a file
-plt.savefig('training_rewards.png')
+plt.savefig('ppo_training_rewards.png')
 
 # Save the rewards and steps to a file
-np.savez('training_data.npz', rewards=reward_callback.episode_rewards, steps=reward_callback.steps)
+np.savez('ppo_training_data.npz', rewards=reward_callback.episode_rewards, steps=reward_callback.steps)
