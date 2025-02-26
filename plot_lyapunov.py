@@ -70,7 +70,7 @@ def plot2D(agent):
         #     np.linspace(0.11, 1.2, 5)  # Fewer contours between 0.1 and 1.2
         # ])
         # Define custom contour levels
-        levels = np.linspace(0, 0.1, 100)  # More contours between 0 and 0.1
+        levels = np.linspace(0, 1.5, 25)  # More contours between 0 and 0.1
 
         # Create a custom colormap
         colors = [(0, 0, 1), (0, 1, 0), (1, 1, 0), (1, 0, 0)]  # Blue, Green, Yellow, Red
